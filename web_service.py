@@ -1,6 +1,5 @@
+from __future__ import division
 from __future__ import print_function
-
-import os
 
 import caffe
 import numpy as np
@@ -9,67 +8,60 @@ from PIL import Image
 from flask import Flask, request
 from flask import jsonify
 from math import ceil
-from scipy import misc
 
-from image_utils import base64_png_image_to_pillow_image, get_apt_image_size, \
-    get_temp_png_file_path
+from image_utils import base64_png_image_to_pillow_image
 
 app = Flask(__name__)
 
 DESIRED_WIDTH = 256
 DESIRED_HEIGHT = 256
-MAX_NUM_PIXELS = DESIRED_WIDTH * DESIRED_HEIGHT
 DEPLOYPROTO = '/flownet2/flownet2/models/FlowNet2/FlowNet2_deploy.prototxt.template'
 CAFFEMODEL = '/flownet2/flownet2/models/FlowNet2/FlowNet2_weights.caffemodel.h5'
 VERBOSE = True
 
 # Load model
-try:
-    variables = {'TARGET_WIDTH': DESIRED_WIDTH, 'TARGET_HEIGHT': DESIRED_HEIGHT}
-    divisor = 64.
-    variables['ADAPTED_WIDTH'] = int(ceil(DESIRED_WIDTH/divisor) * divisor)
-    variables['ADAPTED_HEIGHT'] = int(ceil(DESIRED_HEIGHT/divisor) * divisor)
+variables = {'TARGET_WIDTH': DESIRED_WIDTH, 'TARGET_HEIGHT': DESIRED_HEIGHT}
+divisor = 64.
+variables['ADAPTED_WIDTH'] = int(ceil(DESIRED_WIDTH/divisor) * divisor)
+variables['ADAPTED_HEIGHT'] = int(ceil(DESIRED_HEIGHT/divisor) * divisor)
 
-    variables['SCALE_WIDTH'] = DESIRED_WIDTH / float(variables['ADAPTED_WIDTH'])
-    variables['SCALE_HEIGHT'] = DESIRED_HEIGHT / float(variables['ADAPTED_HEIGHT'])
+variables['SCALE_WIDTH'] = DESIRED_WIDTH / float(variables['ADAPTED_WIDTH'])
+variables['SCALE_HEIGHT'] = DESIRED_HEIGHT / float(variables['ADAPTED_HEIGHT'])
 
-    tmp = tempfile.NamedTemporaryFile(mode='w', delete=True)
-    proto = open(DEPLOYPROTO).readlines()
-    for line in proto:
-        for key, value in variables.items():
-            tag = "$%s$" % key
-            line = line.replace(tag, str(value))
-        tmp.write(line)
-    tmp.flush()
+tmp = tempfile.NamedTemporaryFile(mode='w', delete=True)
+proto = open(DEPLOYPROTO).readlines()
+for line in proto:
+    for key, value in variables.items():
+        tag = "$%s$" % key
+        line = line.replace(tag, str(value))
+    tmp.write(line)
+tmp.flush()
 
-    if not VERBOSE:
-        caffe.set_logging_disabled()
-    caffe.set_device(0)  # use first GPU
-    caffe.set_mode_gpu()
-    net = caffe.Net(tmp.name, CAFFEMODEL, caffe.TEST)
-except:
-    print("Failed to load model")
-    raise
+if not VERBOSE:
+    caffe.set_logging_disabled()
+caffe.set_device(0)  # use first GPU
+caffe.set_mode_gpu()
+net = caffe.Net(tmp.name, CAFFEMODEL, caffe.TEST)
 
 
-def process(image1_path, image2_path):
-    in0 = image1_path
-    in1 = image2_path
-    if not os.path.isfile(in0):
-        raise BaseException('img0 does not exist: '+in0)
-    if not os.path.isfile(in1):
-        raise BaseException('img1 does not exist: '+in1)
-
+def process(img0, img1):
+    """
+    :param img0: numpy array with shape == (DESIRED_HEIGHT, DESIRED_WIDTH, 3)
+        and dtype == np.uint8
+    :param img1: numpy array with shape == (DESIRED_HEIGHT, DESIRED_WIDTH, 3)
+        and dtype == np.uint8
+    :return:
+    """
     num_blobs = 2
     input_data = []
-    img0 = misc.imread(in0)
+
     if len(img0.shape) < 3:
         input_data.append(img0[np.newaxis, np.newaxis, :, :])
     else:
         input_data.append(
             img0[np.newaxis, :, :, :].transpose(0, 3, 1, 2)[:, [2, 1, 0], :, :]
         )
-    img1 = misc.imread(in1)
+
     if len(img1.shape) < 3:
         input_data.append(img1[np.newaxis, np.newaxis, :, :])
     else:
@@ -87,8 +79,8 @@ def process(image1_path, image2_path):
     #
     print('Network forward pass using %s.' % CAFFEMODEL)
     i = 1
-    while i<=5:
-        i+=1
+    while i <= 5:
+        i += 1
 
         net.forward(**input_dict)
 
@@ -129,27 +121,26 @@ def estimate_flow():
     if image1.size != image2.size:
         raise Exception('The two images must have the same size')
 
-    original_content_image_size = image1.size
-    smaller_image_size = get_apt_image_size(image1, MAX_NUM_PIXELS)
-    use_downsampled_image = smaller_image_size != original_content_image_size
-    if use_downsampled_image:
-        image1 = image1.resize(smaller_image_size, Image.LANCZOS)
-        image2 = image2.resize(smaller_image_size, Image.LANCZOS)
+    scale_x_back_factor = image1.width / DESIRED_WIDTH
+    scale_y_back_factor = image1.height / DESIRED_HEIGHT
+    image1 = image1.resize((DESIRED_WIDTH, DESIRED_HEIGHT), Image.LANCZOS)
+    image1 = np.array(image1.convert('RGB'))
+    image2 = image2.resize((DESIRED_WIDTH, DESIRED_HEIGHT), Image.LANCZOS)
+    image2 = np.array(image2.convert('RGB'))
 
-    image1_path = get_temp_png_file_path()
-    image1.save(image1_path)
-    image2_path = get_temp_png_file_path()
-    image2.save(image2_path)
+    flow = process(image1, image2)
 
-    flow = process(image1_path, image2_path)
+    # Scale up the flow
+    flow[:, :, 0] *= scale_x_back_factor
+    flow[:, :, 1] *= scale_y_back_factor
 
-    if use_downsampled_image:
-        # Now resize the image back to the original size, if applicable
-        # Also remember to scale up the flow by the correct factor
-        raise Exception('Upscaling result is not implemented. Try smaller input images.')
-        pass# output_image = output_image.resize(original_content_image_size, Image.LANCZOS)
-
-    return jsonify({'flow': flow.tolist()})
+    return jsonify(
+        {
+            'flow': flow.tolist(),
+            'scale_x_back_factor': scale_x_back_factor,
+            'scale_y_back_factor': scale_y_back_factor
+        }
+    )
 
 
 if __name__ == "__main__":

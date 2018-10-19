@@ -54,9 +54,12 @@ Or in background mode:
 }
 ```
 
-Images are expected to be 256 x 256.
+The output matrix will have 256 x 256 resolution, regardless of input size.
+This matrix needs to be rescaled (e.g. with
+[scikit-image](http://scikit-image.org/docs/dev/api/skimage.transform.html#skimage.transform.resize) with `preserve_range=True`)
+to the input image size if needed.
 
-Output will be like this:
+The returned JSON will look like this:
 
 ```
 {
@@ -108,7 +111,9 @@ Output will be like this:
             ...
             [ 0.03442889  1.34803653]
             [-0.23310344  0.87845743]
-            [ 0.22394601  0.79704392]]]
+            [ 0.22394601  0.79704392]]],
+  "scale_x_back_factor": 4.0,
+  "scale_y_back_factor": 4.0
 }
 ```
 
