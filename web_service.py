@@ -13,8 +13,8 @@ from image_utils import base64_png_image_to_pillow_image
 
 app = Flask(__name__)
 
-DESIRED_WIDTH = 256
-DESIRED_HEIGHT = 256
+DESIRED_WIDTH = 512
+DESIRED_HEIGHT = 512
 DEPLOYPROTO = '/flownet2/flownet2/models/FlowNet2/FlowNet2_deploy.prototxt.template'
 CAFFEMODEL = '/flownet2/flownet2/models/FlowNet2/FlowNet2_weights.caffemodel.h5'
 VERBOSE = True

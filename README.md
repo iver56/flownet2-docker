@@ -54,7 +54,7 @@ Or in background mode:
 }
 ```
 
-The output matrix will have 256 x 256 resolution, regardless of input size.
+The output matrix will have 512 x 512 resolution, regardless of input size.
 This matrix needs to be rescaled (e.g. with
 [scikit-image](http://scikit-image.org/docs/dev/api/skimage.transform.html#skimage.transform.resize) with `preserve_range=True`)
 to the input image size if needed.
